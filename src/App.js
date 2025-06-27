@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, {useState, useEffect } from 'react';
 import { Calendar, Clock, Edit, Trash2, Plus, Check, X, Book, AlertCircle } from 'lucide-react';
 
-const API_URL = 'http://localhost:3000/api'; // Ajuste para a URL da sua API
+const API_URL = 'http://172.22.32.1:3000/api/activities'; // URL da sua API de atividades
 
 // Estilos CSS
 const styles = {
@@ -338,7 +338,6 @@ const styles = {
   }
 };
 
-// Adicionar animação de rotação
 const spinKeyframes = `
   @keyframes spin {
     from { transform: rotate(0deg); }
@@ -361,7 +360,7 @@ const App = () => {
     priority: 'medium'
   });
 
-  // Buscar atividades
+  // Buscar atividades da API
   useEffect(() => {
     fetchActivities();
   }, []);
@@ -369,107 +368,95 @@ const App = () => {
   const fetchActivities = async () => {
     try {
       setLoading(true);
-      // Buscar do localStorage
-      const savedActivities = localStorage.getItem('student-activities');
-      if (savedActivities) {
-        setActivities(JSON.parse(savedActivities));
-      } else {
-        // Dados iniciais de exemplo
-        const initialData = [
-          {
-            id: 1,
-            title: 'Prova de Matemática',
-            description: 'Estudar capítulos 5 e 6',
-            date: '2024-01-20',
-            time: '14:00',
-            subject: 'Matemática',
-            priority: 'high',
-            completed: false
-          },
-          {
-            id: 2,
-            title: 'Trabalho de História',
-            description: 'Pesquisa sobre Revolução Industrial',
-            date: '2024-01-22',
-            time: '23:59',
-            subject: 'História',
-            priority: 'medium',
-            completed: false
-          }
-        ];
-        setActivities(initialData);
-        localStorage.setItem('student-activities', JSON.stringify(initialData));
+      const response = await fetch(API_URL);
+      if (!response.ok) {
+        throw new Error('Erro ao buscar atividades');
       }
+      const data = await response.json();
+      setActivities(data);
     } catch (err) {
-      setError('Erro ao carregar atividades');
+      setError('Erro ao carregar atividades da API');
     } finally {
       setLoading(false);
     }
   };
 
-  // Salvar no localStorage sempre que activities mudar
-  useEffect(() => {
-    if (activities.length > 0 || localStorage.getItem('student-activities')) {
-      localStorage.setItem('student-activities', JSON.stringify(activities));
-    }
-  }, [activities]);
-
-  // Criar ou atualizar atividade
+  // Criar ou atualizar atividade na API
   const handleSubmit = async () => {
-    // Validação
     if (!formData.title || !formData.description || !formData.date || !formData.time || !formData.subject) {
       setError('Por favor, preencha todos os campos');
       return;
     }
 
+    const method = editingActivity ? 'PUT' : 'POST';
+    const url = editingActivity ? `${API_URL}/${editingActivity._id}` : API_URL;
+
     try {
-      if (editingActivity) {
-        // Atualizar atividade existente
-        const updatedActivities = activities.map(activity =>
-          activity.id === editingActivity.id
-            ? { ...activity, ...formData }
-            : activity
-        );
-        setActivities(updatedActivities);
-      } else {
-        // Criar nova atividade
-        const newActivity = {
-          id: Date.now(),
-          ...formData,
-          completed: false
-        };
-        setActivities([...activities, newActivity]);
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+      });
+
+      if (!response.ok) {
+        throw new Error('Erro ao salvar atividade');
       }
-      
+
+      fetchActivities(); // Re-buscar atividades para atualizar a lista
       resetForm();
       setError('');
     } catch (err) {
-      setError('Erro ao salvar atividade');
+      setError('Erro ao salvar atividade na API');
     }
   };
 
-  // Deletar atividade
+  // Deletar atividade na API
   const handleDelete = async (id) => {
     if (window.confirm('Tem certeza que deseja excluir esta atividade?')) {
       try {
-        setActivities(activities.filter(activity => activity.id !== id));
+        const response = await fetch(`${API_URL}/${id}`, {
+          method: 'DELETE',
+        });
+
+        if (!response.ok) {
+          throw new Error('Erro ao deletar atividade');
+        }
+
+        setActivities(activities.filter(activity => activity._id !== id));
       } catch (err) {
-        setError('Erro ao deletar atividade');
+        setError('Erro ao deletar atividade na API');
       }
     }
   };
 
-  // Marcar como concluída
+  // Marcar como concluída (ou reabrir) na API
   const toggleComplete = async (id) => {
+    const activityToUpdate = activities.find(activity => activity._id === id);
+    if (!activityToUpdate) return;
+
+    const updatedActivityData = { ...activityToUpdate, completed: !activityToUpdate.completed };
+
     try {
+      const response = await fetch(`${API_URL}/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatedActivityData),
+      });
+
+      if (!response.ok) {
+        throw new Error('Erro ao atualizar atividade');
+      }
+
       const updatedActivities = activities.map(activity =>
-        activity.id === id
-          ? { ...activity, completed: !activity.completed }
-          : activity
+        activity._id === id ? { ...activity, completed: !activity.completed } : activity
       );
       setActivities(updatedActivities);
     } catch (err) {
-      setError('Erro ao atualizar atividade');
+      setError('Erro ao atualizar atividade na API');
     }
   };
 
@@ -491,7 +478,8 @@ const App = () => {
     setFormData({
       title: activity.title,
       description: activity.description,
-      date: activity.date,
+      // Formata a data para o formato YYYY-MM-DD que o input type="date" espera
+      date: new Date(activity.date).toISOString().split('T')[0],
       time: activity.time,
       subject: activity.subject,
       priority: activity.priority
@@ -500,23 +488,15 @@ const App = () => {
     setShowForm(true);
   };
 
-  const getPriorityColor = (priority) => {
-    switch (priority) {
-      case 'high': return 'text-red-600 bg-red-50';
-      case 'medium': return 'text-yellow-600 bg-yellow-50';
-      case 'low': return 'text-green-600 bg-green-50';
-      default: return 'text-gray-600 bg-gray-50';
-    }
-  };
-
   const formatDate = (dateStr) => {
     const date = new Date(dateStr);
-    return date.toLocaleDateString('pt-BR');
+    // Adiciona o fuso horário para evitar problemas de data "um dia antes"
+    return new Date(date.getTime() + date.getTimezoneOffset() * 60000).toLocaleDateString('pt-BR');
   };
 
   // Ordenar atividades por data
-  const sortedActivities = [...activities].sort((a, b) => 
-    new Date(a.date + ' ' + a.time) - new Date(b.date + ' ' + b.time)
+  const sortedActivities = [...activities].sort((a, b) =>
+    new Date(`${a.date}T${a.time}`) - new Date(`${b.date}T${b.time}`)
   );
 
   if (loading) {
@@ -574,7 +554,7 @@ const App = () => {
           ) : (
             sortedActivities.map(activity => (
               <div
-                key={activity.id}
+                key={activity._id} // Alterado para _id
                 style={{
                   ...styles.card,
                   ...(activity.completed ? styles.cardCompleted : {})
@@ -591,12 +571,12 @@ const App = () => {
                   </h3>
                   <span style={{
                     ...styles.priorityBadge,
-                    ...(activity.priority === 'high' ? styles.priorityHigh : 
-                        activity.priority === 'medium' ? styles.priorityMedium : 
+                    ...(activity.priority === 'high' ? styles.priorityHigh :
+                      activity.priority === 'medium' ? styles.priorityMedium :
                         styles.priorityLow)
                   }}>
-                    {activity.priority === 'high' ? 'Alta' : 
-                     activity.priority === 'medium' ? 'Média' : 'Baixa'}
+                    {activity.priority === 'high' ? 'Alta' :
+                      activity.priority === 'medium' ? 'Média' : 'Baixa'}
                   </span>
                 </div>
 
@@ -624,7 +604,7 @@ const App = () => {
 
                 <div style={styles.cardActions}>
                   <button
-                    onClick={() => toggleComplete(activity.id)}
+                    onClick={() => toggleComplete(activity._id)} // Alterado para _id
                     style={{
                       ...styles.actionButton,
                       ...(activity.completed ? styles.reopenButton : styles.completeButton)
@@ -654,7 +634,7 @@ const App = () => {
                       <Edit style={{ ...styles.editIcon, height: '16px', width: '16px' }} />
                     </button>
                     <button
-                      onClick={() => handleDelete(activity.id)}
+                      onClick={() => handleDelete(activity._id)} // Alterado para _id
                       style={styles.iconButton}
                       onMouseEnter={(e) => e.target.style.backgroundColor = '#fee2e2'}
                       onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
